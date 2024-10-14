@@ -29,16 +29,22 @@ static char ourboard_char(struct our_board* board, int r, int c) {
         return hit_char(board->hits[r][c]);
     case AIRCRAFT_CARRIER:
         chr = 'A';
+        break;
     case BATTLESHIP:
         chr = 'B';
+        break;
     case CRUISER:
         chr = 'C';
+        break;
     case SUBMARINE:
         chr = 'S';
+        break;
     case DESTROYER:
         chr = 'D';
+        break;
     default:
         chr = ' ';
+        break;
     }
 
     if (board->hits[r][c] == HIT)
