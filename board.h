@@ -1,3 +1,6 @@
+#ifndef _BOARD_H
+#define _BOARD_H
+
 #define BOARD_SIZE 10
 
 enum hit_state {
@@ -28,3 +31,5 @@ struct our_board {
 void ourboard_init(struct our_board* board);
 
 void ourboard_print(struct our_board* board);
+
+#endif
