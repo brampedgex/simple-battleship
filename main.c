@@ -71,7 +71,7 @@ static void server(const char* port) {
         exit(1);
     }
 
-    printf("Got client connection!\n");
+    printf("Got client connection...\n");
 
     struct connection conn = { 
         .type = PEER_SERVER, 
@@ -79,23 +79,33 @@ static void server(const char* port) {
         .fd = cfd 
     };
 
-    struct packet packet;
-    if (recv_packet(&conn, &packet)) {
+    struct packet incoming, outgoing;
+    if (recv_packet(&conn, &incoming)) {
         exit(1);
     }
 
-    switch (packet.type) {
+    switch (incoming.type) {
     case PKT_CLIENT_HELLO:
-        printf("Got client hello!\n");
         break;
     case PKT_DISCONNECT: {
-        fprintf(stderr, "disconnected: %s\n", packet.disconnect.reason);
+        fprintf(stderr, "disconnected: %s\n", incoming.disconnect.reason);
         exit(0);
     } break;
     default:
         disconnectf(&conn, "unexpected initial packet from client");
         exit(1);
     }
+
+    outgoing = (struct packet){ .type = PKT_SERVER_HELLO };
+    send_packet(&conn, &outgoing);
+
+    printf("Connected! When you're ready, press enter to begin.");
+    getchar();
+
+    outgoing = (struct packet){ .type = PKT_SERVER_READY };
+    send_packet(&conn, &outgoing);
+
+    // ...
 }
 
 static void client(const char* host, const char* port) {
@@ -131,23 +141,44 @@ static void client(const char* host, const char* port) {
         .fd = sockfd
     };
 
-    struct packet packet = { .type = PKT_CLIENT_HELLO };
-    send_packet(&conn, &packet);
+    struct packet incoming, outgoing;
+
+    outgoing = (struct packet){ .type = PKT_CLIENT_HELLO };
+    send_packet(&conn, &outgoing);
     
-    struct packet response;
-    if (recv_packet(&conn, &response)) {
+    if (recv_packet(&conn, &incoming)) {
         exit(1);
     }
 
-    switch (response.type) {
+    switch (incoming.type) {
     case PKT_DISCONNECT:
-        fprintf(stderr, "disconnected: %s\n", response.disconnect.reason);
+        fprintf(stderr, "disconnected: %s\n", incoming.disconnect.reason);
         break;
     case PKT_SERVER_HELLO:
-        printf("Got server hello packet!\n");
+        break;
     default:
-        disconnectf(&conn, "unexpected server response to hello\n");
+        disconnectf(&conn, "expected a server hello packet");
+        exit(1);
     }
+
+    printf("Connected! Waiting for host to begin...\n");
+
+    if (recv_packet(&conn, &incoming)) {
+        exit(1);
+    }
+
+    switch (incoming.type) {
+    case PKT_SERVER_READY:
+        break;
+    case PKT_DISCONNECT:
+        fprintf(stderr, "disconnected: %s\n", incoming.disconnect.reason);
+        break;
+    default:
+        disconnectf(&conn, "expected a server ready packet");
+        exit(1);
+    }
+
+    // ...
 }
 
 int main(int argc, const char** argv) {

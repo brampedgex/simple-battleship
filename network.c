@@ -68,41 +68,70 @@ void disconnectf(struct connection* conn, const char* fmt, ...) {
     conn->is_disconnected = 1;
 }
 
+#define PACKET_MAX_LENGTH 512
+
 void send_packet(struct connection *conn, struct packet *pkt) {
     struct packet_header header = { .type = pkt->type };
+
+    char buf[3 + PACKET_MAX_LENGTH];
+    char* body = &buf[3];
     
     switch (pkt->type) {
+    case PKT_SERVER_HELLO:
     case PKT_CLIENT_HELLO: {
-        char buf[7];
-        
-        header.length = 4;
-        pack_u32(pack_header(buf, &header), NET_MAGIC);
-        send(conn->fd, buf, 7, 0);
+        body = pack_u32(body, NET_MAGIC);
     } break;
+    case PKT_SERVER_READY:
+        break;
     case PKT_DISCONNECT: {
-        char buf[3 + 511];
-
-        header.length = strlen(pkt->disconnect.reason);
-        char* ptr = pack_header(buf, &header);
-        memcpy(ptr, pkt->disconnect.reason, header.length);
-
-        send(conn->fd, buf, 3 + header.length, 0);
+        size_t length = strlen(pkt->disconnect.reason);
+        memcpy(body, pkt->disconnect.reason, length);
+        body += length;
     } break;
     default:
         fprintf(stderr, "TODO: Packet type %i\n", pkt->type);
         return;
     }
+
+    header.length = body - buf - 3;
+    pack_header(buf, &header);
+    send(conn->fd, buf, header.length + 3, 0);
 }
 
 int recv_packet(struct connection* conn, struct packet* pkt) {
-    char buf[3];
-    if (recv(conn->fd, buf, 3, 0) < 3) {
+    ssize_t recv_status;
+
+    char buf[3 + PACKET_MAX_LENGTH];
+    if ((recv_status = recv(conn->fd, buf, 3, 0)) < 3) {
+        if (recv_status == 0) {
+            fprintf(stderr, "error: The connection was closed.\n");
+            return -1;
+        }
+        if (recv_status < 0) {
+            perror("recv error");
+            return -1;
+        }
         disconnectf(conn, "protocol error: bad packet header");
         return -1;
     }
 
     struct packet_header header;
     unpack_header(buf, &header);
+
+    if (header.length > PACKET_MAX_LENGTH) {
+        disconnectf(conn, "protocol error: packet too long");
+        return -1;
+    }
+
+    char* body = buf + 3;
+    if ((recv_status = recv(conn->fd, body, header.length, 0)) < header.length) {
+        if (recv_status < 0) {
+            perror("recv error");
+            return -1;
+        }
+        disconnectf(conn, "protocol error: didn't get all the bytes (%i of %i)", (int)recv_status, header.length);
+        return -1;
+    }
 
     switch (header.type) {
     case PKT_CLIENT_HELLO: {
@@ -111,16 +140,29 @@ int recv_packet(struct connection* conn, struct packet* pkt) {
             return -1;
         }
 
-        char buf[4];
-        if (recv(conn->fd, buf, 4, 0) < 4) {
-            disconnectf(conn, "protocol error: bad client hello packet (2)");
+        u32 magic;
+        unpack_u32(body, &magic);
+        if (magic != NET_MAGIC) {
+            disconnectf(conn, "protocol error: bad magic");
+            return -1;
+        }
+    } break;
+    case PKT_SERVER_HELLO: {
+        if (header.length != 4) {
+            disconnectf(conn, "protocol error: bad server hello packet (1): %i", header.length);
             return -1;
         }
 
         u32 magic;
-        unpack_u32(buf, &magic);
+        unpack_u32(body, &magic);
         if (magic != NET_MAGIC) {
             disconnectf(conn, "protocol error: bad magic");
+            return -1;
+        }
+    } break;
+    case PKT_SERVER_READY: {
+        if (header.length != 0) {
+            disconnectf(conn, "protocol error: bad server ready packet: %i", header.length);
             return -1;
         }
     } break;
@@ -132,15 +174,10 @@ int recv_packet(struct connection* conn, struct packet* pkt) {
         }
 
         // TODO: Maybe, just maybe, we should sanitize the string
-        char buf[512] = {0};
-        if (recv(conn->fd, buf, header.length, 0) < header.length) {
-            disconnectf(conn, "protocol error: bad disconnect packet");
-            return -1;
-        }
-        strncpy(pkt->disconnect.reason, buf, 511);
+        strncpy(pkt->disconnect.reason, body, 511);
     } break;
     default:
-        disconnectf(conn, "protocol error: bad packet header");
+        disconnectf(conn, "protocol error: bad packet type: %i", header.type);
         return -1;
     }
 
