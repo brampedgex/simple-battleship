@@ -7,7 +7,9 @@
 #include <unistd.h>
 
 #include "board.h"
+#include "packet.h"
 #include "player.h"
+#include "network.h"
 
 static void server(const char* port) {
     int status;
@@ -69,15 +71,31 @@ static void server(const char* port) {
         exit(1);
     }
 
-    printf("Client connected!\n");
+    printf("Got client connection!\n");
 
-    char msg[64] = {0};
-    recv(cfd, msg, 63, 0);
-    printf("client says: %s\n", msg);
+    struct connection conn = { 
+        .type = PEER_SERVER, 
+        .is_disconnected = 0,
+        .fd = cfd 
+    };
 
-    const char* reply = "Hello, client!";
-    send(cfd, reply, strlen(reply), 0);
-    printf("reply sent\n");
+    struct packet packet;
+    if (recv_packet(&conn, &packet)) {
+        exit(1);
+    }
+
+    switch (packet.type) {
+    case PKT_CLIENT_HELLO:
+        printf("Got client hello!\n");
+        break;
+    case PKT_DISCONNECT: {
+        fprintf(stderr, "disconnected: %s\n", packet.disconnect.reason);
+        exit(0);
+    } break;
+    default:
+        disconnectf(&conn, "unexpected initial packet from client");
+        exit(1);
+    }
 }
 
 static void client(const char* host, const char* port) {
@@ -105,12 +123,31 @@ static void client(const char* host, const char* port) {
         exit(1);
     }
 
-    const char* msg = "Hello, server\n";
-    send(sockfd, msg, strlen(msg), 0);
+    printf("Connected!\n");
 
-    char reply[64] = {0};
-    recv(sockfd, reply, 63, 0);
-    printf("Server reply: %s\n", reply);
+    struct connection conn = {
+        .type = PEER_CLIENT,
+        .is_disconnected = 0,
+        .fd = sockfd
+    };
+
+    struct packet packet = { .type = PKT_CLIENT_HELLO };
+    send_packet(&conn, &packet);
+    
+    struct packet response;
+    if (recv_packet(&conn, &response)) {
+        exit(1);
+    }
+
+    switch (response.type) {
+    case PKT_DISCONNECT:
+        fprintf(stderr, "disconnected: %s\n", response.disconnect.reason);
+        break;
+    case PKT_SERVER_HELLO:
+        printf("Got server hello packet!\n");
+    default:
+        disconnectf(&conn, "unexpected server response to hello\n");
+    }
 }
 
 int main(int argc, const char** argv) {
