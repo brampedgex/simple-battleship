@@ -4,12 +4,140 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netdb.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "board.h"
 #include "packet.h"
 #include "player.h"
 #include "network.h"
+
+struct game_state {
+    struct our_board board;
+    struct their_board their_board;
+    enum peer_type turn;
+};
+
+#define EXPECT_PACKET(conn, packet, pkttype, name) \
+    if (recv_packet((conn), &(packet)))         \
+        exit(1);                                \
+    switch ((packet).type) {                    \
+    case pkttype:                               \
+        break;                                  \
+    case PKT_DISCONNECT:                        \
+        fprintf(stderr, "disconnected: %s\n", packet.disconnect.reason);\
+        exit(1);                                \
+    default:                                    \
+        disconnectf(conn, "expected a " name " packet");    \
+        exit(1);                                \
+    }
+
+static void play_game(struct connection* conn) {
+    struct game_state state;
+    struct packet incoming, outgoing;
+
+    player_create_board(&state.board);
+    their_board_init(&state.their_board);
+
+    outgoing.type = PKT_SHIPS_READY;
+    send_packet(conn, &outgoing);
+
+    printf("Waiting for the other player...\n");
+
+    EXPECT_PACKET(conn, incoming, PKT_SHIPS_READY, "ships ready");
+
+    if (conn->type == PEER_SERVER) {
+        srand(time(NULL));
+        outgoing.type = PKT_BEGIN_GAME;
+        outgoing.begin_game.first = state.turn = (enum peer_type)(rand() % 2);
+        send_packet(conn, &outgoing);
+    } else {
+        EXPECT_PACKET(conn, incoming, PKT_BEGIN_GAME, "begin game");
+        state.turn = incoming.begin_game.first;
+    }
+
+    while (1) {
+        if (state.turn == conn->type) {
+            printf("THEIR BOARD:\n");
+            their_board_print(&state.their_board);
+
+            int r, c;
+
+            while (1) {
+                printf("Enter the square to shoot at (eg. A1): ");
+                
+                if (player_get_coord(&r, &c))
+                    continue;
+
+                if (state.their_board.hits[r][c] != HS_NONE) {
+                    printf("You've already shot at this square.\n");
+                    continue;
+                }
+
+                break;
+            }
+
+            outgoing.type = PKT_MOVE;
+            outgoing.move = (struct pkt_move){ .row = r, .col = c };
+            send_packet(conn, &outgoing);
+
+            EXPECT_PACKET(conn, incoming, PKT_MOVE_RESULT, "move result");
+
+            switch (incoming.move_result.result) {
+            case NET_HIT:
+                printf("Hit!\n");
+                break;
+            case NET_MISS:
+                printf("Miss!\n");
+                break;
+            case NET_SINK:
+                printf("TODO");
+                break;
+            }
+        } else {
+            printf("Waiting for their move...\n");
+            EXPECT_PACKET(conn, incoming, PKT_MOVE, "move");
+
+            int r = incoming.move.row, c = incoming.move.col;
+            enum net_move_result result;
+
+            if (state.board.hits[r][c] != HS_NONE) {
+                disconnectf(conn, "attempting to hit a square that was already hit");
+                exit(1);
+            }
+
+            enum ship ship = state.board.ships[r][c];
+            if (ship != SHIP_NONE) {
+                result = NET_HIT;
+                state.board.hits[r][c] = HIT;
+                state.board.ship_counts[ship]--;
+            } else {
+                result = NET_MISS;
+                state.board.hits[r][c] = MISS;
+            }
+
+            outgoing.type = PKT_MOVE_RESULT;
+            outgoing.move_result = (struct pkt_move_result){ .result = result };
+            send_packet(conn, &outgoing);
+
+            printf("YOUR BOARD:\n");
+            ourboard_print(&state.board);
+
+            if (result == NET_HIT) {
+                printf("They shot at %c%i and hit your %s!\n", 
+                    c + 'A',
+                    r + 1,
+                    ship_name(ship));
+            } else {
+                printf("They shot at %c%i and missed.\n",
+                    c + 'A',
+                    r + 1);
+            }
+        }
+
+        state.turn = state.turn == PEER_SERVER ? PEER_CLIENT : PEER_SERVER;
+    }
+}
 
 static void server(const char* port) {
     int status;
@@ -80,21 +208,8 @@ static void server(const char* port) {
     };
 
     struct packet incoming, outgoing;
-    if (recv_packet(&conn, &incoming)) {
-        exit(1);
-    }
-
-    switch (incoming.type) {
-    case PKT_CLIENT_HELLO:
-        break;
-    case PKT_DISCONNECT: {
-        fprintf(stderr, "disconnected: %s\n", incoming.disconnect.reason);
-        exit(0);
-    } break;
-    default:
-        disconnectf(&conn, "unexpected initial packet from client");
-        exit(1);
-    }
+    
+    EXPECT_PACKET(&conn, incoming, PKT_CLIENT_HELLO, "client hello");
 
     outgoing = (struct packet){ .type = PKT_SERVER_HELLO };
     send_packet(&conn, &outgoing);
@@ -105,7 +220,7 @@ static void server(const char* port) {
     outgoing = (struct packet){ .type = PKT_SERVER_READY };
     send_packet(&conn, &outgoing);
 
-    // ...
+    play_game(&conn);
 }
 
 static void client(const char* host, const char* port) {
@@ -146,39 +261,13 @@ static void client(const char* host, const char* port) {
     outgoing = (struct packet){ .type = PKT_CLIENT_HELLO };
     send_packet(&conn, &outgoing);
     
-    if (recv_packet(&conn, &incoming)) {
-        exit(1);
-    }
-
-    switch (incoming.type) {
-    case PKT_DISCONNECT:
-        fprintf(stderr, "disconnected: %s\n", incoming.disconnect.reason);
-        break;
-    case PKT_SERVER_HELLO:
-        break;
-    default:
-        disconnectf(&conn, "expected a server hello packet");
-        exit(1);
-    }
+    EXPECT_PACKET(&conn, incoming, PKT_SERVER_HELLO, "server hello");
 
     printf("Connected! Waiting for host to begin...\n");
 
-    if (recv_packet(&conn, &incoming)) {
-        exit(1);
-    }
+    EXPECT_PACKET(&conn, incoming, PKT_SERVER_READY, "server ready");
 
-    switch (incoming.type) {
-    case PKT_SERVER_READY:
-        break;
-    case PKT_DISCONNECT:
-        fprintf(stderr, "disconnected: %s\n", incoming.disconnect.reason);
-        break;
-    default:
-        disconnectf(&conn, "expected a server ready packet");
-        exit(1);
-    }
-
-    // ...
+    play_game(&conn);
 }
 
 int main(int argc, const char** argv) {

@@ -17,8 +17,33 @@ char hit_char(enum hit_state hit) {
     }
 }
 
+const char* ship_name(enum ship ship) {
+    switch (ship) {
+    case AIRCRAFT_CARRIER:
+        return "Aircraft Carrier";
+    case BATTLESHIP:
+        return "Battleship";
+    case CRUISER:
+        return "Cruiser";
+    case SUBMARINE:
+        return "Submarine";
+    case DESTROYER:
+        return "Destroyer";
+    default:
+        return "<invalid>";
+    }
+}
+
 void ourboard_init(struct our_board *board) {
     memset(board, 0, sizeof(struct our_board));
+}
+
+void their_board_init(struct their_board* board) {
+    for (int i = 0; i < BOARD_SIZE; i++) {
+        for (int j = 0; j < BOARD_SIZE; j++) {
+            board->hits[i][j] = HS_NONE;
+        }
+    }
 }
 
 static char ourboard_char(struct our_board* board, int r, int c) {
@@ -60,6 +85,19 @@ void ourboard_print(struct our_board *board) {
         printf("%2i [", i + 1);
         for (int j = 0; j < BOARD_SIZE; j++) {
             putchar(ourboard_char(board, i, j));
+            putchar(j == BOARD_SIZE - 1 ? ']' : '|');
+        }
+        putchar('\n');
+    }
+}
+
+void their_board_print(struct their_board* board) {
+    printf("    A B C D E F G H I J\n");
+    
+    for (int i = 0; i < BOARD_SIZE; i++) {
+        printf("%2i [", i + 1);
+        for (int j = 0; j < BOARD_SIZE; j++) {
+            putchar(hit_char(board->hits[i][j]));
             putchar(j == BOARD_SIZE - 1 ? ']' : '|');
         }
         putchar('\n');

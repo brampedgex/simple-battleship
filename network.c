@@ -78,16 +78,30 @@ void send_packet(struct connection *conn, struct packet *pkt) {
     
     switch (pkt->type) {
     case PKT_SERVER_HELLO:
-    case PKT_CLIENT_HELLO: {
+    case PKT_CLIENT_HELLO:
         body = pack_u32(body, NET_MAGIC);
-    } break;
+        break;
     case PKT_SERVER_READY:
+    case PKT_SHIPS_READY:
         break;
     case PKT_DISCONNECT: {
         size_t length = strlen(pkt->disconnect.reason);
         memcpy(body, pkt->disconnect.reason, length);
         body += length;
     } break;
+    case PKT_BEGIN_GAME:
+        *body++ = (u8)pkt->begin_game.first;
+        break;
+    case PKT_MOVE:
+        *body++ = (u8)pkt->move.row;
+        *body++ = (u8)pkt->move.col;
+        break;
+    case PKT_MOVE_RESULT:
+        *body++ = (u8)pkt->move_result.result;
+        break;
+    case PKT_END_GAME:
+        *body++ = (u8)pkt->end_game.winner;
+        break;
     default:
         fprintf(stderr, "TODO: Packet type %i\n", pkt->type);
         return;
@@ -124,21 +138,27 @@ int recv_packet(struct connection* conn, struct packet* pkt) {
     }
 
     char* body = buf + 3;
-    if ((recv_status = recv(conn->fd, body, header.length, 0)) < header.length) {
-        if (recv_status < 0) {
-            perror("recv error");
+    if (header.length > 0) {
+        if ((recv_status = recv(conn->fd, body, header.length, 0)) < header.length) {
+            if (recv_status < 0) {
+                perror("recv error");
+                return -1;
+            }
+            disconnectf(conn, "protocol error: didn't get all the bytes (%i of %i)", (int)recv_status, header.length);
             return -1;
         }
-        disconnectf(conn, "protocol error: didn't get all the bytes (%i of %i)", (int)recv_status, header.length);
-        return -1;
     }
+
+#define EXPECT_LENGTH(elength, name)                                                     \
+    if (header.length != (elength)) {                                                    \
+        disconnectf(conn, "protocol error: bad " name " length: %i", header.length);    \
+        return -1;                                                                      \
+    }
+
 
     switch (header.type) {
     case PKT_CLIENT_HELLO: {
-        if (header.length != 4) {
-            disconnectf(conn, "protocol error: bad client hello packet (1): %i", header.length);
-            return -1;
-        }
+        EXPECT_LENGTH(4, "client hello");
 
         u32 magic;
         unpack_u32(body, &magic);
@@ -148,10 +168,7 @@ int recv_packet(struct connection* conn, struct packet* pkt) {
         }
     } break;
     case PKT_SERVER_HELLO: {
-        if (header.length != 4) {
-            disconnectf(conn, "protocol error: bad server hello packet (1): %i", header.length);
-            return -1;
-        }
+        EXPECT_LENGTH(4, "server hello");
 
         u32 magic;
         unpack_u32(body, &magic);
@@ -160,13 +177,13 @@ int recv_packet(struct connection* conn, struct packet* pkt) {
             return -1;
         }
     } break;
-    case PKT_SERVER_READY: {
-        if (header.length != 0) {
-            disconnectf(conn, "protocol error: bad server ready packet: %i", header.length);
-            return -1;
-        }
-    } break;
-    case PKT_DISCONNECT: {
+    case PKT_SERVER_READY:
+        EXPECT_LENGTH(0, "server ready");
+        break;
+    case PKT_SHIPS_READY:
+        EXPECT_LENGTH(0, "ships ready");
+        break;
+    case PKT_DISCONNECT:
         if (header.length > 511) {
             // TODO: it's kinda stupid to disconnect when receiving a disconnect message
             disconnectf(conn, "protocol error: disconnect message too long");
@@ -175,7 +192,50 @@ int recv_packet(struct connection* conn, struct packet* pkt) {
 
         // TODO: Maybe, just maybe, we should sanitize the string
         strncpy(pkt->disconnect.reason, body, 511);
+        break;
+    case PKT_BEGIN_GAME: {
+        EXPECT_LENGTH(1, "begin game");
+        enum peer_type first;
+        first = (enum peer_type)*body;
+        if (first != PEER_CLIENT && first != PEER_SERVER) {
+            disconnectf(conn, "protocol error: invalid 'first' field in begin game");
+            return -1;
+        }
+
+        pkt->begin_game.first = first;
     } break;
+    case PKT_MOVE: {
+        EXPECT_LENGTH(2, "move");
+
+        int row = (int)body[0];
+        int col = (int)body[1];
+        if (row < 0 || row >= BOARD_SIZE || col < 0 || col >= BOARD_SIZE) {
+            disconnectf(conn, "protocol error: invalid coordinates in move packet");
+            return -1;
+        }
+
+        pkt->move.row = row;
+        pkt->move.col = col;
+    } break;
+    case PKT_MOVE_RESULT: {
+        EXPECT_LENGTH(1, "move result");
+        
+        enum net_move_result result = (enum net_move_result)*body;
+        switch (result) {
+        case NET_HIT:
+        case NET_MISS:
+        case NET_SINK:
+            break;
+        default:
+            disconnectf(conn, "protocol error: invalid result in move result packet");
+            return -1;
+        }
+
+        pkt->move_result.result = result;
+        break;
+    } case PKT_END_GAME:
+        EXPECT_LENGTH(1, "end game");
+        break;
     default:
         disconnectf(conn, "protocol error: bad packet type: %i", header.type);
         return -1;

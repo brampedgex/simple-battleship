@@ -5,7 +5,7 @@
 #include <string.h>
 
 // Read a board coordinate from stdin. Returns 1 if failed, 0 if succeeded.
-static int get_coord(int* r, int* c) {
+int player_get_coord(int* r, int* c) {
     char* line = NULL;
     size_t size = 0;
 
@@ -33,7 +33,7 @@ static int get_coord(int* r, int* c) {
 invalid:
     printf("Invalid coordinate.\n");
     free(line);
-    return 1;
+    return -1;
 }
 
 // Gets a direction. 0 for horizontal, 1 for vertical. Returns 2 if "cancel" was typed.
@@ -99,7 +99,7 @@ static void place_ship(struct our_board* board, enum ship ship, const char* name
 cancel:
     while (1) {
         printf("Choose a square to put your %s: ", name);
-        if (get_coord(&r, &c))
+        if (player_get_coord(&r, &c))
             continue;
 
         if (ship_obstructed(board, r, c, 0, size) 
