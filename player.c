@@ -1,4 +1,5 @@
 #include "player.h"
+#include <assert.h>
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -91,46 +92,10 @@ static int ship_obstructed(struct our_board* board, int r, int c, int dir, int s
     return 0;
 }
 
-static void place_ship(struct our_board* board, enum ship ship, const char* name, int size) {
-    ourboard_print(board);
-
-    int r, c, dir;
-
-cancel:
-    while (1) {
-        printf("Choose a square to put your %s: ", name);
-        if (player_get_coord(&r, &c))
-            continue;
-
-        if (ship_obstructed(board, r, c, 0, size) 
-            && ship_obstructed(board, r, c, 1, size)) {
-            printf("There is no way to place the ship at that square.\n");
-            continue;
-        }
-
-        break;
-    }
-
-    while (1) {
-        printf("Choose a direction to orient the ship (H/V, or cancel to start over): ");
-
-        int result = get_direction(&dir);
-
-        if (result == 2)
-            goto cancel;
-
-        if (result == 1)
-            continue;
-
-        if (ship_obstructed(board, r, c, dir, size)) {
-            printf("Cannot place a ship that way.\n");
-            continue;
-        }
-
-        break;
-    }
-
+static void place_ship(struct our_board* board, enum ship ship, int r, int c, int dir, int size) {
     for (int i = 0; i < size; i++) {
+        assert(board->ships[r][c] == SHIP_NONE);
+
         board->ships[r][c] = ship;
 
         if (dir)
@@ -142,18 +107,120 @@ cancel:
     }
 }
 
-void player_create_board(struct our_board *board) {
-retry:
-    ourboard_init(board);
-    place_ship(board, AIRCRAFT_CARRIER, "Aircraft Carrier", 5);
-    place_ship(board, BATTLESHIP, "Battleship", 4);
-    place_ship(board, CRUISER, "Cruiser", 3);
-    place_ship(board, SUBMARINE, "Submarine", 3);
-    place_ship(board, DESTROYER, "Destroyer", 2);
-
+static void player_place_ship(struct our_board* board, enum ship ship, int size) {
     ourboard_print(board);
-    printf("Is this okay? (y/n) ");
 
-    if (tolower(getchar()) != 'y')
-        goto retry;
+    int r, c, dir;
+
+    while (1) {
+        printf("Enter the coordinates of the top/leftmost part of the ship followed by the direction (eg. \"A1 H\"):\n");
+
+        char* line = NULL;
+        size_t size = 0;
+
+        if (getline(&line, &size, stdin) < 0) {
+            fprintf(stderr, "Failed to read a line, trying again...\n");
+            free(line);
+            continue;
+        }
+
+        char col_char;
+        int row_num;
+        char dir_char;
+
+        if (sscanf(line, "%c%i %c", &col_char, &row_num, &dir_char) != 3) {
+            printf("Invalid location.\n");
+            free(line);
+            continue;
+        }
+
+        free(line);
+
+        if (row_num < 1 || row_num > 10 || col_char < 'A' || col_char > 'J' || (dir_char != 'H' && dir_char != 'V')) {
+            printf("Invalid location.\n");
+            continue;
+        }
+
+        r = row_num - 1;
+        c = col_char - 'A';
+        dir = (dir_char == 'H' ? 0 : 1);
+
+        if (ship_obstructed(board, r, c, dir, 0)) {
+            printf("This location is obstructed.\n");
+            continue;
+        }
+
+        break;
+    }
+    
+    place_ship(board, ship, r, c, dir, size);
+}
+
+static void place_ship_random(struct our_board* board, enum ship ship, int size) {
+    int obstructed_table[BOARD_SIZE][BOARD_SIZE][2];
+    int unobstructed_count = 0;
+
+    for (int i = 0; i < BOARD_SIZE; i++) {
+        for (int j = 0; j < BOARD_SIZE; j++) {
+            for (int k = 0; k < 2; k++) {
+                int obstructed = ship_obstructed(board, i, j, k, size);
+                obstructed_table[i][j][k] = obstructed;
+
+                if (!obstructed) {
+                    unobstructed_count++;
+                }
+            }
+        }
+    }
+
+    int idx = rand() % unobstructed_count;
+    int counter = 0;
+
+    int r = 0, c = 0, dir = 0;
+    int placed = 0;
+
+    for (int i = 0; i < BOARD_SIZE; i++) {
+        for (int j = 0; j < BOARD_SIZE; j++) {
+            for (int k = 0; k < 2; k++) {
+                if (!obstructed_table[i][j][k] && idx == counter++) {
+                    placed = 1;
+
+                    r = i;
+                    c = j;
+                    dir = k;
+                }
+            }
+        }
+    }
+
+    assert(placed);
+    place_ship(board, ship, r, c, dir, size);
+}
+
+static void board_init_random(struct our_board* board) {
+    ourboard_init(board);
+    place_ship_random(board, AIRCRAFT_CARRIER, 5);
+    place_ship_random(board, BATTLESHIP, 4);
+    place_ship_random(board, CRUISER, 3);
+    place_ship_random(board, SUBMARINE, 3);
+    place_ship_random(board, DESTROYER, 2);
+}
+
+void player_create_board(struct our_board *board) {
+    board_init_random(board);
+    ourboard_print(board);
+    printf("Your ships have been arranged randomly. Is this okay? (y/n) ");
+
+    while (tolower(getchar()) == 'n') {
+        ourboard_init(board);
+        player_place_ship(board, AIRCRAFT_CARRIER, 5);
+        player_place_ship(board, BATTLESHIP, 4);
+        player_place_ship(board, CRUISER, 3);
+        player_place_ship(board, SUBMARINE, 3);
+        player_place_ship(board, DESTROYER, 2);
+
+
+        ourboard_print(board);
+        printf("Is this okay? (y/n) ");
+    }
 }

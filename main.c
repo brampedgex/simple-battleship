@@ -47,7 +47,6 @@ static void play_game(struct connection* conn) {
     EXPECT_PACKET(conn, incoming, PKT_SHIPS_READY, "ships ready");
 
     if (conn->type == PEER_SERVER) {
-        srand(time(NULL));
         outgoing.type = PKT_BEGIN_GAME;
         outgoing.begin_game.first = state.turn = (enum peer_type)(rand() % 2);
         send_packet(conn, &outgoing);
@@ -271,6 +270,8 @@ static void client(const char* host, const char* port) {
 }
 
 int main(int argc, const char** argv) {
+    srand(time(NULL));
+
     if (argc >= 2 && strcmp(argv[1], "server") == 0) {
         server(argc > 2 ? argv[2] : NULL);
     } else if (argc >= 2 && strcmp(argv[1], "client") == 0) {
