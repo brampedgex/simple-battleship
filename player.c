@@ -74,6 +74,16 @@ invalid:
     return 1;
 }
 
+static int has_ship(struct our_board* board, int r, int c) {
+    if (r >= BOARD_SIZE || c >= BOARD_SIZE || r < 0 || c < 0)
+        return 0;
+    
+    if (board->ships[r][c] != SHIP_NONE)
+        return 1;
+
+    return 0;
+}
+
 static int ship_obstructed(struct our_board* board, int r, int c, int dir, int size) {
     int cur_row = r, cur_col = c;
     
@@ -82,6 +92,13 @@ static int ship_obstructed(struct our_board* board, int r, int c, int dir, int s
             return 1;
 
         if (board->ships[cur_row][cur_col] != SHIP_NONE)
+            return 1;
+
+        // Check four neighboring squares to make sure there isn't a ship there either.
+        if (has_ship(board, cur_row - 1, cur_col)
+            || has_ship(board, cur_row + 1, cur_col)
+            || has_ship(board, cur_row, cur_col - 1)
+            || has_ship(board, cur_row, cur_col + 1))
             return 1;
 
         if (dir)
@@ -117,9 +134,9 @@ static void player_place_ship(struct our_board* board, enum ship ship, int size)
         printf("Enter the coordinates of the top/leftmost part of the ship followed by the direction (eg. \"A1 H\"):\n");
 
         char* line = NULL;
-        size_t size = 0;
+        size_t linesize = 0;
 
-        if (getline(&line, &size, stdin) < 0) {
+        if (getline(&line, &linesize, stdin) < 0) {
             fprintf(stderr, "Failed to read a line, trying again...\n");
             free(line);
             continue;
@@ -146,7 +163,7 @@ static void player_place_ship(struct our_board* board, enum ship ship, int size)
         c = col_char - 'A';
         dir = (dir_char == 'H' ? 0 : 1);
 
-        if (ship_obstructed(board, r, c, dir, 0)) {
+        if (ship_obstructed(board, r, c, dir, size)) {
             printf("This location is obstructed.\n");
             continue;
         }
