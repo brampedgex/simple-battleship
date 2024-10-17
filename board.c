@@ -4,16 +4,13 @@
 #include <string.h>
 
 char hit_char(enum hit_state hit) {
-    if (hit == 0)
-        return ' ';
-
     switch (hit) {
     case HS_NONE:
         return ' ';
     case HIT:
         return 'x';
     case MISS:
-        return 'o';
+        return '.';
     }
 }
 

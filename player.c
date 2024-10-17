@@ -1,4 +1,5 @@
 #include "player.h"
+#include "util.h"
 #include <assert.h>
 #include <ctype.h>
 #include <stdio.h>
@@ -211,14 +212,13 @@ void player_create_board(struct our_board *board) {
     ourboard_print(board);
     printf("Your ships have been arranged randomly. Is this okay? (y/n) ");
 
-    while (tolower(getchar()) == 'n') {
+    while (tolower(getcharline()) == 'n') {
         ourboard_init(board);
         player_place_ship(board, AIRCRAFT_CARRIER, 5);
         player_place_ship(board, BATTLESHIP, 4);
         player_place_ship(board, CRUISER, 3);
         player_place_ship(board, SUBMARINE, 3);
         player_place_ship(board, DESTROYER, 2);
-
 
         ourboard_print(board);
         printf("Is this okay? (y/n) ");

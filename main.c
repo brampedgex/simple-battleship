@@ -55,9 +55,11 @@ static void play_game(struct connection* conn) {
         state.turn = incoming.begin_game.first;
     }
 
+    printf("Begin!\n");
+
     while (1) {
         if (state.turn == conn->type) {
-            printf("THEIR BOARD:\n");
+            printf("\nTHEIR BOARD:\n");
             their_board_print(&state.their_board);
 
             int r, c;
@@ -82,12 +84,21 @@ static void play_game(struct connection* conn) {
 
             EXPECT_PACKET(conn, incoming, PKT_MOVE_RESULT, "move result");
 
+            if (incoming.move_result.result != NET_HIT) {
+                state.their_board.hits[r][c] = MISS;
+            } else {
+                state.their_board.hits[r][c] = HIT;
+            }
+
+            printf("\nTHEIR BOARD:\n");
+            their_board_print(&state.their_board);
+
             switch (incoming.move_result.result) {
             case NET_HIT:
-                printf("Hit!\n");
+                printf("Hit! ");
                 break;
             case NET_MISS:
-                printf("Miss!\n");
+                printf("Miss! ");
                 break;
             case NET_SINK:
                 printf("TODO");
@@ -119,7 +130,7 @@ static void play_game(struct connection* conn) {
             outgoing.move_result = (struct pkt_move_result){ .result = result };
             send_packet(conn, &outgoing);
 
-            printf("YOUR BOARD:\n");
+            printf("\nYOUR BOARD:\n");
             ourboard_print(&state.board);
 
             if (result == NET_HIT) {
@@ -132,6 +143,9 @@ static void play_game(struct connection* conn) {
                     c + 'A',
                     r + 1);
             }
+
+            printf("Press enter to continue...");
+            skipline();
         }
 
         state.turn = state.turn == PEER_SERVER ? PEER_CLIENT : PEER_SERVER;
@@ -188,8 +202,6 @@ static void server(const char* port) {
             printf("Server listening on port %i\n", ntohs(new_addr.sin_port));
     }
 
-    printf("Waiting for client to connect...\n");
-
     struct sockaddr_storage caddr;
     socklen_t caddr_len = sizeof caddr;
     int cfd = accept(sockfd, (struct sockaddr*)&caddr, &caddr_len);
@@ -214,7 +226,7 @@ static void server(const char* port) {
     send_packet(&conn, &outgoing);
 
     printf("Connected! When you're ready, press enter to begin.");
-    getchar();
+    skipline();
 
     outgoing = (struct packet){ .type = PKT_SERVER_READY };
     send_packet(&conn, &outgoing);
@@ -247,7 +259,7 @@ static void client(const char* host, const char* port) {
         exit(1);
     }
 
-    printf("Connected!\n");
+    printf("Got server connection...\n");
 
     struct connection conn = {
         .type = PEER_CLIENT,
