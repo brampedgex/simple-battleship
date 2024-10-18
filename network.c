@@ -98,9 +98,12 @@ void send_packet(struct connection *conn, struct packet *pkt) {
         break;
     case PKT_MOVE_RESULT:
         *body++ = (u8)pkt->move_result.result;
-        break;
-    case PKT_END_GAME:
-        *body++ = (u8)pkt->end_game.winner;
+        *body++ = (u8)pkt->move_result.ship_type;
+        *body++ = (u8)pkt->move_result.ship_row;
+        *body++ = (u8)pkt->move_result.ship_col;
+        *body++ = (u8)pkt->move_result.ship_dir;
+        *body++ = (u8)pkt->move_result.ship_size;
+        *body++ = (u8)pkt->move_result.win;
         break;
     default:
         fprintf(stderr, "TODO: Packet type %i\n", pkt->type);
@@ -218,7 +221,7 @@ int recv_packet(struct connection* conn, struct packet* pkt) {
         pkt->move.col = col;
     } break;
     case PKT_MOVE_RESULT: {
-        EXPECT_LENGTH(1, "move result");
+        EXPECT_LENGTH(7, "move result");
         
         enum net_move_result result = (enum net_move_result)*body;
         switch (result) {
@@ -231,11 +234,45 @@ int recv_packet(struct connection* conn, struct packet* pkt) {
             return -1;
         }
 
+        enum ship ship_type = (enum ship)body[1];
+        switch (ship_type) {
+        case SHIP_NONE:
+        case AIRCRAFT_CARRIER:
+        case BATTLESHIP:
+        case CRUISER:
+        case SUBMARINE:
+        case DESTROYER:
+            break;
+        default:
+            disconnectf(conn, "protocol error: invalid ship_type in move result packet");
+            return -1;
+        }
+
+        int r = (int)body[2], 
+            c = (int)body[3], 
+            dir = (int)body[4], 
+            ship_size = (int)body[5], 
+            win = (int)body[6];
+
+        if (r < 0 || c < 0 || r >= BOARD_SIZE || c >= BOARD_SIZE) {
+            disconnectf(conn, "protocol error: invalid ship pos for move result: %i %i", r, c);
+            return -1;
+        }
+
+        if ((dir && (r + ship_size > BOARD_SIZE))
+            || (!dir && (c + ship_size > BOARD_SIZE))) {
+            disconnectf(conn, "protocol error: ship for move result exceeds bounds: %i %i %i %i", r, c, dir, ship_size);
+            return -1;
+        }
+
         pkt->move_result.result = result;
-        break;
-    } case PKT_END_GAME:
-        EXPECT_LENGTH(1, "end game");
-        break;
+        pkt->move_result.ship_type = ship_type;
+        pkt->move_result.ship_row = r;
+        pkt->move_result.ship_col = c;
+        pkt->move_result.ship_dir = dir;
+        pkt->move_result.ship_size = ship_size;
+        pkt->move_result.win = win;
+    } break;
     default:
         disconnectf(conn, "protocol error: bad packet type: %i", header.type);
         return -1;

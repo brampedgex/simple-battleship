@@ -23,11 +23,19 @@ enum ship {
 
 const char* ship_name(enum ship ship);
 
+struct placed_ship {
+    int row, col;
+    int dir; 
+    int size;
+    // How many squares are left. 0 means the ship sank.
+    int count;
+};
+
 struct our_board {
     enum hit_state hits[BOARD_SIZE][BOARD_SIZE];
     enum ship ships[BOARD_SIZE][BOARD_SIZE];
-    // Stores how many cells contain a ship of each ship type. If a number goes to zero it means the ship sank.
-    int ship_counts[SHIP_COUNT];
+    struct placed_ship placements[SHIP_COUNT];
+    int ship_count;
 };
 
 struct their_board {

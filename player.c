@@ -111,6 +111,16 @@ static int ship_obstructed(struct our_board* board, int r, int c, int dir, int s
 }
 
 static void place_ship(struct our_board* board, enum ship ship, int r, int c, int dir, int size) {
+    board->placements[ship] = (struct placed_ship){
+        .row = r,
+        .col = c,
+        .dir = dir,
+        .size = size,
+        .count = size
+    };
+
+    board->ship_count++;
+    
     for (int i = 0; i < size; i++) {
         assert(board->ships[r][c] == SHIP_NONE);
 
@@ -120,8 +130,6 @@ static void place_ship(struct our_board* board, enum ship ship, int r, int c, in
             r++;
         else
             c++;
-
-        board->ship_counts[ship]++;
     }
 }
 

@@ -17,8 +17,6 @@ enum packet_type {
     
     PKT_MOVE,           // Player has made a move
     PKT_MOVE_RESULT,    // Result of a move (hit, miss, ship sunk)
-    
-    PKT_END_GAME,       // Sent from the server to end a game, including the winner.
 
     PKT_DISCONNECT,     // Sent when an error is encountered.
 };
@@ -55,7 +53,9 @@ struct pkt_move_result {
     enum net_move_result result;
     // Sink data. this only filled in if a ship was sunk
     enum ship ship_type;
-    int ship_row, ship_col, ship_dir;
+    int ship_row, ship_col, ship_dir, ship_size;
+    // 1 if the move sunk the last ship.
+    u8 win;
 };
 
 struct pkt_end_game {

@@ -84,12 +84,16 @@ static void play_game(struct connection* conn) {
 
             EXPECT_PACKET(conn, incoming, PKT_MOVE_RESULT, "move result");
 
-            if (incoming.move_result.result != NET_HIT) {
-                state.their_board.hits[r][c] = MISS;
-            } else {
+            switch (incoming.move_result.result) {
+            case NET_HIT:
+            case NET_SINK:
                 state.their_board.hits[r][c] = HIT;
+                break;
+            case NET_MISS:
+                state.their_board.hits[r][c] = MISS;
+                break;
             }
-
+            
             printf("\nTHEIR BOARD:\n");
             their_board_print(&state.their_board);
 
@@ -101,7 +105,12 @@ static void play_game(struct connection* conn) {
                 printf("Miss! ");
                 break;
             case NET_SINK:
-                printf("TODO");
+                printf("You sunk their %s! ", ship_name(incoming.move_result.ship_type));
+                break;
+            }
+
+            if (incoming.move_result.win) {
+                printf("\n\nYou won!\n");
                 break;
             }
         } else {
@@ -109,39 +118,65 @@ static void play_game(struct connection* conn) {
             EXPECT_PACKET(conn, incoming, PKT_MOVE, "move");
 
             int r = incoming.move.row, c = incoming.move.col;
-            enum net_move_result result;
 
             if (state.board.hits[r][c] != HS_NONE) {
                 disconnectf(conn, "attempting to hit a square that was already hit");
                 exit(1);
             }
 
+            outgoing.type = PKT_MOVE_RESULT;
+            outgoing.move_result = (struct pkt_move_result){0};
+
             enum ship ship = state.board.ships[r][c];
             if (ship != SHIP_NONE) {
-                result = NET_HIT;
+                outgoing.move_result.result = NET_HIT;
                 state.board.hits[r][c] = HIT;
-                state.board.ship_counts[ship]--;
+                if (--state.board.placements[ship].count <= 0) {
+                    struct placed_ship sunk = state.board.placements[ship];
+                    outgoing.move_result.result = NET_SINK;
+                    outgoing.move_result.ship_row = sunk.row;
+                    outgoing.move_result.ship_col = sunk.col;
+                    outgoing.move_result.ship_dir = sunk.dir;
+                    outgoing.move_result.ship_size = sunk.size;
+                    outgoing.move_result.ship_type = ship;
+
+                    if (--state.board.ship_count <= 0) {
+                        outgoing.move_result.win = 1;
+                    }
+                }
             } else {
-                result = NET_MISS;
+                outgoing.move_result.result = NET_MISS;
                 state.board.hits[r][c] = MISS;
             }
 
-            outgoing.type = PKT_MOVE_RESULT;
-            outgoing.move_result = (struct pkt_move_result){ .result = result };
             send_packet(conn, &outgoing);
 
             printf("\nYOUR BOARD:\n");
             ourboard_print(&state.board);
 
-            if (result == NET_HIT) {
+            switch (outgoing.move_result.result) {
+            case NET_HIT:
                 printf("They shot at %c%i and hit your %s!\n", 
                     c + 'A',
                     r + 1,
                     ship_name(ship));
-            } else {
+                break;
+            case NET_SINK:
+                printf("They shot at %c%i and sunk your %s!\n",
+                    c + 'A',
+                    r + 1,
+                    ship_name(ship));
+                break;
+            case NET_MISS:
                 printf("They shot at %c%i and missed.\n",
                     c + 'A',
                     r + 1);
+                break;
+            }
+
+            if (outgoing.move_result.win) {
+                printf("\nYou lost!\n");
+                break;
             }
 
             printf("Press enter to continue...");
