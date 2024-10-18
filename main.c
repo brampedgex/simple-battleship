@@ -93,7 +93,7 @@ static void play_game(struct connection* conn) {
                 state.their_board.hits[r][c] = MISS;
                 break;
             }
-            
+
             printf("\nTHEIR BOARD:\n");
             their_board_print(&state.their_board);
 
@@ -196,7 +196,7 @@ static void server(const char* port) {
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_flags = AI_NUMERICSERV;
 
-    if ((status = getaddrinfo("localhost", port, &hints, &res))) {
+    if ((status = getaddrinfo("0.0.0.0", port, &hints, &res))) {
         fprintf(stderr, "getaddrinfo error: %s\n", gai_strerror(status));
         exit(1);
     }
